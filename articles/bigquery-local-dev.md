@@ -184,24 +184,16 @@ bigquery-emulator:
 BigQuery書き込み用のNewWriter関数とbigquery-emulator書き込み用のNewEmulatorWriter関数の2種類を用意し、環境に応じて接続先を変えられるように実装しました。下記は実装の例です。
 
 ```go
-// BigQueryのManagedWriter用（主に書き込み）のクライアント
 type WriteClient struct {
 	c         *managedwriter.Client
 	projectID string
 	datasetID string
-	Option
 }
 
 type NewWriteClientFunc func(context.Context) (*WriteClient, error)
 
-func newWriteClient(c *managedwriter.Client, projectID, datasetID string, opts ...CreateOption) *WriteClient {
-	o := Option{
-		logger: logr.Discard(),
-	}
-	for _, opt := range opts {
-		opt(&o)
-	}
-	return &WriteClient{c: c, projectID: projectID, datasetID: datasetID, Option: o}
+func newWriteClient(c *managedwriter.Client, projectID, datasetID string) *WriteClient {
+	return &WriteClient{c: c, projectID: projectID, datasetID: datasetID}
 }
 
 func NewWriter(projectID, datasetID string, opts ...CreateOption) NewWriteClientFunc {
@@ -213,11 +205,11 @@ func NewWriter(projectID, datasetID string, opts ...CreateOption) NewWriteClient
 		if err != nil {
 			return nil, fmt.Errorf("failed to create new bq client: %w", err)
 		}
-		return newWriteClient(c, projectID, datasetID, opts...), nil
+		return newWriteClient(c, projectID, datasetID), nil
 	}
 }
 
-func NewEmulatorWriter(projectID, datasetID, serverURL string, opts ...CreateOption) NewWriteClientFunc {
+func NewEmulatorWriter(projectID, datasetID, serverURL string) NewWriteClientFunc {
 	return func(ctx context.Context) (*WriteClient, error) {
 		c, err := managedwriter.NewClient(
 			ctx,
@@ -230,9 +222,16 @@ func NewEmulatorWriter(projectID, datasetID, serverURL string, opts ...CreateOpt
 		if err != nil {
 			return nil, fmt.Errorf("failed to create new bq emulator client: %w", err)
 		}
-		return newWriteClient(c, projectID, datasetID, opts...), nil
+		return newWriteClient(c, projectID, datasetID), nil
 	}
 }
+```
+
+上記のコードに記載の通り、bigquery-emulator接続時はtlsを無効にする必要がありました。
+
+```
+// bigquery-emulator接続時はtlsを無効にする。
+option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 ```
 
 ここで苦慮したのが、BigQuery Storage Write APIのどのストリームを使用して書き込みを行うかです。書き込み方法には下記の4種類があります。
