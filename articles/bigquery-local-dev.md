@@ -229,7 +229,7 @@ func NewEmulatorWriter(projectID, datasetID, serverURL string) NewWriteClientFun
 
 上記のコードに記載の通り、bigquery-emulator接続時はtlsを無効にする必要がありました。
 
-```
+```go
 // bigquery-emulator接続時はtlsを無効にする。
 option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 ```
@@ -265,15 +265,15 @@ pendingStream, err := wc.c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRe
 ```go
 	var bqNewClientFunc bq.NewClientFunc
 	var bqNewWriteClientFunc bq.NewWriteClientFunc
-    // 接続先をbigquery-emulatorに
+	// 接続先をbigquery-emulatorに
 	if cfg.IsDevelopment() {
-        // BigQuery REST APIクライアントの初期化
+		// BigQuery REST APIクライアントの初期化
 		bqNewClientFunc = bq.NewEmulatorClient(
 			cfg.BqProjectID,
 			cfg.BqDatasetID,
 			"http://bigquery-emulator:9050",
 		)
-        // BigQuery Storage Write APIクライアントの初期化
+		// BigQuery Storage Write APIクライアントの初期化
 		bqNewWriteClientFunc = bq.NewEmulatorWriter(
 			cfg.BqProjectID,
 			cfg.BqDatasetID,
@@ -282,11 +282,11 @@ pendingStream, err := wc.c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRe
 		if err := bq.InitEmulator(bqNewClientFunc); err != nil {
 			return fmt.Errorf("failed to initializing bigquery-emulator: %w", err)
 		}
-    // 接続先をBigQueryに
+	// 接続先をBigQueryに
 	} else {
-        // BigQuery REST APIクライアントの初期化
+		// BigQuery REST APIクライアントの初期化
 		bqNewClientFunc = bq.NewClient(cfg.BqProjectID, cfg.BqDatasetID)
-        // BigQuery Storage Write APIクライアントの初期化
+		// BigQuery Storage Write APIクライアントの初期化
 		bqNewWriteClientFunc = bq.NewWriter(cfg.BqProjectID, cfg.BqDatasetID)
 	}
 
@@ -297,7 +297,7 @@ pendingStream, err := wc.c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRe
 - http://bigquery-emulator:9050
 - bigquery-emulator:9060
 
-### 5. レコードの読み込み、書き込み
+### 5. レコードの読み込み
 
 レコードの読み込みはBigQuery REST APIを使用したため、下記のドキュメントのコードのようにクエリを定義し、パラメータを付与してReedメソッドを呼ぶという実装にしています。
 
@@ -320,7 +320,13 @@ if err != nil {
 
 - [bigquery package - cloud.google.com/go/bigquery - Go Packages](https://pkg.go.dev/cloud.google.com/go/bigquery)
 
-レコードの書き込みは、BigQuery Storage Write API用のクライアントを使用しています。下記は実際に使用しているコードを少し修正したものです。Addメソッドに渡される`[]FooAdd` をJSONに変換し、BigQuery Storage Write APIに書き込みを行うメソッドに値を渡すことで、書き込みを実現しています。
+### 6. レコードの書き込み
+
+レコードの書き込みは、BigQuery Storage Write API用のクライアントを使用しています。
+
+実装箇所が多岐に渡り全て紹介することが難しいので、断片的に重要な部分を抜粋して紹介します。
+
+下記は実際に使用しているコードを少し修正したものです。Addメソッドに渡される`[]FooAdd` をJSONに変換し、BigQuery Storage Write APIに書き込みを行うWriteBatchメソッドに値を渡すことで、書き込みを実現しています。
 
 ```go
 type FooAdd struct {
@@ -333,17 +339,110 @@ func (repo *FooRepository) Add(ctx context.Context, data []FooAdd) error {
 		return fmt.Errorf("failed to create write client: %w", err)
 	}
 	defer w.Close()
+	// JSONに変換
 	jsonData, err := ConvertToJSON(data)
 	if err != nil {
 		return fmt.Errorf("failed to convert to json: %w", err)
 	}
+	// BigQuery Storage Write APIを使用した書き込み処理
 	if err := w.WriteBatch(ctx, bq.FooSchema, bq.Foo, jsonData); err != nil {
 		return fmt.Errorf("failed to add: %w", err)
 	}
 	return nil
 }
-
 ```
+
+ConvertToJSONメソッドは、ジェネリクスを使用することで任意の構造体をJSONに変換します。
+
+```go
+func ConvertToJSON[T any](values []T) ([][]byte, error) {
+	var jsonData [][]byte
+	for _, v := range values {
+		data, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("error marshalling json: %w", err)
+		}
+		jsonData = append(jsonData, data)
+	}
+	return jsonData, nil
+}
+```
+
+WriteBatchメソッドは、BigQuery Storage Write APIを使用してデータを書き込むためのメソッドです。
+
+```go
+func (wc *WriteClient) WriteBatch(ctx context.Context, schema bigquery.Schema, table Table, rows [][]byte) error {
+	md, descriptorProto, err := descriptor(schema)
+	if err != nil {
+		return fmt.Errorf("failed to make descriptor: %w", err)
+	}
+
+	// jsonをprotoに変換
+	pbRows, err := wc.convertJSONToProto(rows, md)
+	if err != nil {
+		return fmt.Errorf("failed to convert json to proto: %w", err)
+	}
+
+	tableName := managedwriter.TableParentFromParts(wc.projectID, wc.datasetID, string(table))
+
+	// クライアントから書き込み用のStreamを作成
+	pendingStream, err := wc.c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRequest{
+		Parent: tableName,
+		// bigquery-emulatorでも接続可能にするため保留タイプのStreamにしている
+		WriteStream: &storagepb.WriteStream{Type: storagepb.WriteStream_PENDING},
+	})
+	if err != nil {
+		return fmt.Errorf("CreateWriteStream: %w", err)
+	}
+	// クライアントからNewManagedStreamを呼び出し
+	ms, err := wc.c.NewManagedStream(
+		ctx,
+		managedwriter.WithStreamName(pendingStream.GetName()),
+		managedwriter.WithSchemaDescriptor(descriptorProto),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to establish new managed stream: %w", err)
+	}
+	defer ms.Close()
+
+	// AppendRowsでデータを書き込む
+	result, err := ms.AppendRows(ctx, pbRows, managedwriter.WithOffset(0))
+	if err != nil {
+		return fmt.Errorf("failed to append rows: %w", err)
+	}
+	_, err = result.GetResult(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get result: %w", err)
+	}
+
+	// Streamの書き込みを完了させる
+	_, err = ms.Finalize(ctx)
+	if err != nil {
+		return fmt.Errorf("error during Finalize: %w", err)
+	}
+
+	// Streamの書き込みをコミット
+	req := &storagepb.BatchCommitWriteStreamsRequest{
+		Parent:       managedwriter.TableParentFromStreamName(ms.StreamName()),
+		WriteStreams: []string{ms.StreamName()},
+	}
+
+	resp, err := wc.c.BatchCommitWriteStreams(ctx, req)
+	if err != nil {
+		return fmt.Errorf("client.BatchCommit: %w", err)
+	}
+	if len(resp.GetStreamErrors()) > 0 {
+		return fmt.Errorf("stream errors present: %v", resp.GetStreamErrors())
+	}
+
+	return nil
+}
+```
+
+上記のコードでは保留タイプの書き込みを利用して結果をコミットしていますが、デフォルトタイプではもう少し簡略化できるかもしれません。BigQuery Storage Write APIの書き込みは自前で実装する必要が多々ありました。GitHub上で`managedwriter`、`protobuf/proto`等で検索し、公開されているコードを参考に実装してみると良いと思います。
+
+- https://github.com/search?q=managedwriter&type=code
+- https://github.com/search?q=protobuf%2Fproto&type=code
 
 ## まとめ
 
