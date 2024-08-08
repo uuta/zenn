@@ -242,6 +242,10 @@ func NewEmulatorWriter(projectID, datasetID, serverURL string, opts ...CreateOpt
 - **コミットタイプ**: ストリームにレコードを書き込み次第、レコードをすぐに読み取ることができる方法
 - **バッファタイプ**: 行レベルでcommitが行われ、ストリームがフラッシュされるまでレコードがバッファされる方法。通常は使用しない
 
+![BigQuery Storage Write APIの書き込み方法](/images/bigquery-local-dev/data-ingestion-decision-map.png)
+
+- 参考: [BigQuery Storage Write API の概要  |  Google Cloud](https://cloud.google.com/bigquery/docs/write-api?hl=ja)
+
 当初はデフォルトストリームを用いて書き込みを行うつもりでした。しかし、bigquery-emulatorで対応しておらず、保留タイプを使用して書き込みを行う形に変更しました。
 
 ```go
