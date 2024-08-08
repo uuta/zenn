@@ -76,45 +76,45 @@ BigQueryとGo言語をベースにした開発環境との統合に関する情�
 
 bigquery-emulatorを使用する中で、いくつかの関数が動作しないという問題に直面しました。具体的にはDATETIME_BUCKET、MAX_BY、MIN_BYなどの関数が使用できませんでした。
 
-理由は、bigquery-emulatorが依存しているhttps://github.com/goccy/go-zetasqliteで、上記の関数が現状サポートされていなかったためです。MAX_BYやMIN_BYなどの関数は、BigQueryが提供する比較的新しいクエリであり、サポート外の関数が出るのは避けられない印象です。
+理由は、bigquery-emulatorが依存している [goccy/go-zetasqlite](https://github.com/goccy/go-zetasqlite) で、上記の関数が現状サポートされていなかったためです。MAX_BYやMIN_BYなどの関数は、BigQueryが提供する比較的新しいクエリであり、サポート外の関数が出るのは避けられない印象です。
 
 今回は、下記の方法を用いてBigQueryへのリクエストを表現することにしました。
 
-1. CREATE FUNCTIONを使用して、必要な関数を擬似的に作成
-2. BigQuery本体でクエリを実行し、結果を確認する方法を併用
+1. **CREATE FUNCTIONを使用して、必要な関数を擬似的に作成**
+2. **BigQuery本体でクエリを実行し、結果を確認する方法を併用**
 
 まず、1に関して、`udfs`というstring型のスライスの中にCREATE FUNCTIONを入れ、擬似的にTIMESTAMP_BUCKETが利用できる形にしました。以下はCREATE FUNCTIONをGoで実装する例です。
 
 ```go
 func CreateFunction(ctx context.Context, c *bigquery.Client) error {
-	// 追加したいユーザー関数を定義
-	udfs := []string{
-		`
-			CREATE FUNCTION TIMESTAMP_BUCKET(datetime TIMESTAMP, int INTERVAL) AS (
-				CASE int
-					WHEN INTERVAL 1 HOUR
-						THEN datetime
-					WHEN INTERVAL 1 DAY
-						THEN TIMESTAMP(EXTRACT(DATE FROM datetime))
-					WHEN INTERVAL 7 DAY
-						THEN TIMESTAMP_SUB(TIMESTAMP(EXTRACT(DATE FROM datetime)), INTERVAL EXTRACT(DAYOFWEEK FROM datetime) - 1 DAY)
-				END
-			)
-		`,
-	}
-	for _, udf := range udfs {
-		q := c.Query(udf)
-		j, err := q.Run(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to create udf: %w", err)
-		}
+    // 追加したいユーザー関数を定義
+    udfs := []string{
+        `
+            CREATE FUNCTION TIMESTAMP_BUCKET(datetime TIMESTAMP, int INTERVAL) AS (
+                CASE int
+                    WHEN INTERVAL 1 HOUR
+                        THEN datetime
+                    WHEN INTERVAL 1 DAY
+                        THEN TIMESTAMP(EXTRACT(DATE FROM datetime))
+                    WHEN INTERVAL 7 DAY
+                        THEN TIMESTAMP_SUB(TIMESTAMP(EXTRACT(DATE FROM datetime)), INTERVAL EXTRACT(DAYOFWEEK FROM datetime) - 1 DAY)
+                END
+            )
+        `,
+    }
+    for _, udf := range udfs {
+        q := c.Query(udf)
+        j, err := q.Run(ctx)
+        if err != nil {
+            return fmt.Errorf("failed to create udf: %w", err)
+        }
 
-		_, err = j.Wait(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to create udf: %w", err)
-		}
-	}
-	return nil
+        _, err = j.Wait(ctx)
+        if err != nil {
+            return fmt.Errorf("failed to create udf: %w", err)
+        }
+    }
+    return nil
 }
 ```
 
@@ -122,7 +122,7 @@ func CreateFunction(ctx context.Context, c *bigquery.Client) error {
 
 ### 2. テストデータの永続化の問題
 
-次に直面したのは、開発で使用するテストデータをどのように挿入・維持するかという問題です。最初は、bigquery-emulatorに存在する`—database`と `—data-from-yaml` というコマンドでデータの挿入と永続化を試みましたが、下記のエラーにより期待する動作が得られませんでした。
+次に直面したのは、開発で使用するテストデータを**どのように挿入・維持するか**という問題です。最初は、bigquery-emulatorに存在する`—database`と `—data-from-yaml` というコマンドでデータの挿入と永続化を試みましたが、下記のエラーにより期待する動作が得られませんでした。
 
 ```yaml
 BigQuery error in query operation: Error processing job '<job_id>': failed to
@@ -148,16 +148,16 @@ bigquery-emulator:
 
 ### 3. BigQuery Storage Write APIとの統合
 
-データの書き込みは、BigQuery Storage Write APIを利用する形にしました。Google公式のドキュメントにも記載がある通り、コストの面でメリットがあるように思えたからです。
+**データの書き込みは、BigQuery Storage Write APIを利用**する形にしました。Google公式のドキュメントに記載のメリットがあるように思えたからです。
 
-> Storage Write API は、古い insertAll ストリーミング API よりも大幅に低コストです。さらに、1 か月あたり最大 2 TiB を無料で取り込むことができます。- BigQuery Storage Write API の概要  |  Google Cloud
+> Storage Write API は、古い insertAll ストリーミング API よりも大幅に低コストです。さらに、1 か月あたり最大 2 TiB を無料で取り込むことができます。- [BigQuery Storage Write API の概要  |  Google Cloud](https://cloud.google.com/bigquery/docs/write-api?hl=ja)
 
-問題は、BigQuery Storage Write APIをGo言語に組み込むための情報が不足していたことです。　体系的に解説する記事が当時は存在しなかったため、ここら辺を参考に実装を進めました。
+問題は、**BigQuery Storage Write APIをGo言語に組み込むための情報が不足していたこと**です。体系的に解説する記事が当時は存在しなかったため、ここら辺を参考に実装を進めました。
 
 - https://github.com/bucketeer-io/bucketeer/blob/19548c4f783869040b51fb0eddde5d9b25adcdab/pkg/storage/v2/bigquery/writer/client.go
 - https://github.com/luci/luci-go/blob/3f7339cdf0b0747619d469d92b84725a9006e050/resultdb/bqutil/storagewrite.go
 
-BigQuery書き込み用のNewWriter関数とbigquery-emulator書き込み用のNewEmulatorWriter関数の2種類を用意し、環境に応じて接続先を変えられるように実装しました。下記は実装の例です。
+BigQuery書き込み用の`NewWriter`関数とbigquery-emulator書き込み用の`NewEmulatorWriter`関数の2種類を用意し、**環境に応じて接続先を変えられるように実装**しました。下記は実装の例です。
 
 ```go
 type WriteClient struct {
@@ -230,41 +230,44 @@ pendingStream, err := wc.c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRe
 })
 ```
 
-※試してはいないですが、下記のPRでデフォルトストリームに対応したようです🎉
+:::message
+
+試してはいないですが、下記のPRでデフォルトストリームに対応したようです🎉
 
 - https://github.com/goccy/bigquery-emulator/pull/226
+  :::
 
 ### 4. 開発環境と本番環境の出し分け
 
-開発環境ではbigquery-emulatorに、本番環境ではBigQueryに接続するため、main.go内で環境変数により接続先を変える実装にしています。下記は開発環境かどうかでbigquery-emulatorに接続するかどうかを判定していますが、特定の場合に開発用のBigQueryに接続できるように条件を追加しても良いかもしれません。
+開発環境でbigquery-emulatorに、本番環境でBigQueryに接続するため、**main.go内で環境変数により接続先を変える**実装にしています。下記は開発環境かどうかでbigquery-emulatorに接続するかどうかを判定していますが、特定の場合に開発用のBigQueryに接続できるように条件を追加しても良いかもしれません。
 
 ```go
-	var bqNewClientFunc bq.NewClientFunc
-	var bqNewWriteClientFunc bq.NewWriteClientFunc
-	// 接続先をbigquery-emulatorに
-	if cfg.IsDevelopment() {
-		// BigQuery REST APIクライアントの初期化
-		bqNewClientFunc = bq.NewEmulatorClient(
-			cfg.BqProjectID,
-			cfg.BqDatasetID,
-			"http://bigquery-emulator:9050",
-		)
-		// BigQuery Storage Write APIクライアントの初期化
-		bqNewWriteClientFunc = bq.NewEmulatorWriter(
-			cfg.BqProjectID,
-			cfg.BqDatasetID,
-			"bigquery-emulator:9060",
-		)
-		if err := bq.InitEmulator(bqNewClientFunc); err != nil {
-			return fmt.Errorf("failed to initializing bigquery-emulator: %w", err)
-		}
-	// 接続先をBigQueryに
-	} else {
-		// BigQuery REST APIクライアントの初期化
-		bqNewClientFunc = bq.NewClient(cfg.BqProjectID, cfg.BqDatasetID)
-		// BigQuery Storage Write APIクライアントの初期化
-		bqNewWriteClientFunc = bq.NewWriter(cfg.BqProjectID, cfg.BqDatasetID)
-	}
+var bqNewClientFunc bq.NewClientFunc
+var bqNewWriteClientFunc bq.NewWriteClientFunc
+// 接続先をbigquery-emulatorに
+if cfg.IsDevelopment() {
+    // BigQuery REST APIクライアントの初期化
+    bqNewClientFunc = bq.NewEmulatorClient(
+        cfg.BqProjectID,
+        cfg.BqDatasetID,
+        "http://bigquery-emulator:9050",
+    )
+    // BigQuery Storage Write APIクライアントの初期化
+    bqNewWriteClientFunc = bq.NewEmulatorWriter(
+        cfg.BqProjectID,
+        cfg.BqDatasetID,
+        "bigquery-emulator:9060",
+    )
+    if err := bq.InitEmulator(bqNewClientFunc); err != nil {
+        return fmt.Errorf("failed to initializing bigquery-emulator: %w", err)
+    }
+// 接続先をBigQueryに
+} else {
+    // BigQuery REST APIクライアントの初期化
+    bqNewClientFunc = bq.NewClient(cfg.BqProjectID, cfg.BqDatasetID)
+    // BigQuery Storage Write APIクライアントの初期化
+    bqNewWriteClientFunc = bq.NewWriter(cfg.BqProjectID, cfg.BqDatasetID)
+}
 
 ```
 
@@ -298,9 +301,7 @@ if err != nil {
 
 ### 6. レコードの書き込み
 
-レコードの書き込みは、BigQuery Storage Write API用のクライアントを使用しています。
-
-実装箇所が多岐に渡り全て紹介することが難しいので、断片的に重要な部分を抜粋して紹介します。
+**レコードの書き込みは、BigQuery Storage Write API用のクライアント**を使用しています。実装箇所が多岐に渡り全て紹介することが難しいので、断片的に重要な部分を抜粋して紹介します。
 
 下記は実際に使用しているコードを少し修正したものです。Addメソッドに渡される`[]FooAdd` をJSONに変換し、BigQuery Storage Write APIに書き込みを行うWriteBatchメソッドに値を渡すことで、書き込みを実現しています。
 
