@@ -3,7 +3,7 @@ title: "BigQuery×Go開発の裏側：エミュレータ活用からAPI統合ま
 emoji: "🍉"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["bigquery", "go"]
-published: false
+published: true
 ---
 
 SocialDog Analyticsチームエンジニアのuutaです。
