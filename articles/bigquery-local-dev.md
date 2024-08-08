@@ -260,35 +260,39 @@ pendingStream, err := wc.c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRe
 
 ### 4. 開発環境と本番環境の出し分け
 
-開発環境ではbigquery-emulatorに、本番環境ではBigQueryに接続するため、main.go内で環境変数により接続先を変える実装にしています。
+開発環境ではbigquery-emulatorに、本番環境ではBigQueryに接続するため、main.go内で環境変数により接続先を変える実装にしています。下記は開発環境かどうかでbigquery-emulatorに接続するかどうかを判定していますが、特定の場合に開発用のBigQueryに接続できるように条件を追加しても良いかもしれません。
 
 ```go
 	var bqNewClientFunc bq.NewClientFunc
 	var bqNewWriteClientFunc bq.NewWriteClientFunc
+    // 接続先をbigquery-emulatorに
 	if cfg.IsDevelopment() {
+        // BigQuery REST APIクライアントの初期化
 		bqNewClientFunc = bq.NewEmulatorClient(
 			cfg.BqProjectID,
 			cfg.BqDatasetID,
 			"http://bigquery-emulator:9050",
-			bq.WithLogger(l),
 		)
+        // BigQuery Storage Write APIクライアントの初期化
 		bqNewWriteClientFunc = bq.NewEmulatorWriter(
 			cfg.BqProjectID,
 			cfg.BqDatasetID,
 			"bigquery-emulator:9060",
-			bq.WithLogger(l),
 		)
 		if err := bq.InitEmulator(bqNewClientFunc); err != nil {
 			return fmt.Errorf("failed to initializing bigquery-emulator: %w", err)
 		}
+    // 接続先をBigQueryに
 	} else {
-		bqNewClientFunc = bq.NewClient(cfg.BqProjectID, cfg.BqDatasetID, bq.WithLogger(logger))
-		bqNewWriteClientFunc = bq.NewWriter(cfg.BqProjectID, cfg.BqDatasetID, bq.WithLogger(logger))
+        // BigQuery REST APIクライアントの初期化
+		bqNewClientFunc = bq.NewClient(cfg.BqProjectID, cfg.BqDatasetID)
+        // BigQuery Storage Write APIクライアントの初期化
+		bqNewWriteClientFunc = bq.NewWriter(cfg.BqProjectID, cfg.BqDatasetID)
 	}
 
 ```
 
-開発向けに作成した`NewEmulatorClient`、`NewEmulatorWriter` の3つ目の引数でserverURLを指定しているのですが、これらはそれぞれ下記のように設定する必要がありました。
+また、開発向けに作成した`NewEmulatorClient`、`NewEmulatorWriter` の3つ目の引数でserverURLを指定しているのですが、これらはそれぞれ下記のように設定する必要がありました。
 
 - http://bigquery-emulator:9050
 - bigquery-emulator:9060
