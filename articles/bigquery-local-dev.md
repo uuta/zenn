@@ -1,17 +1,18 @@
 ---
-title: "BigQuery×Go開発の裏側：エミュレータ活用からAPI統合まで"
+title: "BigQuery×Go開発の裏側：エミュレータ活用からAPI開発まで"
 emoji: "🍉"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["bigquery", "go"]
 published: true
+publication_name: socialdog
 ---
 
-SocialDog Analyticsチームエンジニアのuutaです。
+SocialDog Analyticsチームエンジニアの[uuta](https://x.com/xXxuutaxXx)です。
 SocialDog Analyticsチームでは主にSocialDogの分析機能の開発を行っています。
 
 ## 前提・問題意識
 
-SocialDogの投稿パフォーマンス機能開発において、大量のデータを効率的に処理する必要性から、BigQueryの採用を検討しました。その過程で、既存のバッチ処理やAPIで使用しているGo言語とBigQueryを連携させる環境の構築に取り組むことになりました。
+SocialDogの[投稿パフォーマンス機能](https://help.social-dog.net/ja/analytics-dashboard-x-postperformance)開発において、大量のデータを効率的に処理する必要性から、**BigQueryの採用を検討**しました。その過程で、既存のバッチ処理やAPIで使用しているGo言語とBigQueryを連携させる環境の構築に取り組むことになりました。
 
 しかし、Go言語でBigQueryを扱う環境の構築に関する情報が非常に限られていたため、多くの課題に直面しました。この記事では、私たちが経験した問題と、その解決策を共有します。
 
@@ -21,6 +22,12 @@ SocialDogの投稿パフォーマンス機能開発において、大量のデ�
 
 :::
 
+## この記事で紹介すること
+
+- Go言語で利用できるBigQueryのパッケージについて
+- bigquery-emulatorを導入するための簡単な説明
+- ローカル開発のトラブルや解決策のtips
+
 ## Go言語とBigQueryを統合したい
 
 SocialDogのバックエンドの新機能開発では、Go言語を主に使用しています。投稿パフォーマンス機能のAPI、バッチ機能開発でもGo言語を利用するため、どのようにBigQueryと統合するかが問題になりました。当初は、ローカル開発環境をbigquery-emulator（後述）のみで完結させることを目指していましたが、現在は一部開発用のBigQueryを使用して実装を進める形に落ち着いています。
@@ -28,7 +35,7 @@ SocialDogのバックエンドの新機能開発では、Go言語を主に使用
 - **本番環境**: BigQueryを使用
 - **開発環境**: bigquery-emulatorの使用、開発用に割り当てたBigQueryを一部テストで使用
 
-## Go言語で利用できるパッケージについて
+## Go言語で利用できるBigQueryのパッケージについて
 
 また、BigQueryを取り扱うためのGo言語のパッケージとして、下記を採用しています。
 
@@ -76,7 +83,14 @@ imageは下記から選択することができます。
 
 ## 開発中のトラブルと解決策のtips
 
-BigQueryとGo言語をベースにした開発環境との統合に関する情報が少なく、開発環境構築には苦慮しました。今も課題はありますが、開発中に直面した課題とチームで採用した解決策について紹介したいと思います。
+BigQueryとGo言語をベースにした開発環境との統合に関する情報が少なく、開発環境構築には苦慮しました。今も課題はありますが、開発中に直面した課題とチームで採用した解決策について紹介したいと思います。項目は下記の通りです。
+
+1. **bigquery-emulatorで関数が動作しない問題**
+2. **テストデータの永続化の問題**
+3. **BigQuery Storage Write APIとの統合**
+4. **開発環境と本番環境の出し分け**
+5. **レコードの読み込み**
+6. **レコードの書き込み**
 
 ### 1. bigquery-emulatorで関数が動作しない問題
 
