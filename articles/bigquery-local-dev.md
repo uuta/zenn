@@ -1,5 +1,5 @@
 ---
-title: "BigQuery×Golang開発の裏側：エミュレータ活用からAPI統合まで"
+title: "BigQuery×Go開発の裏側：エミュレータ活用からAPI統合まで"
 emoji: "🍉"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["bigquery", "go"]
@@ -11,20 +11,20 @@ SocialDog Analyticsチームでは主にSocialDogの分析機能の開発を行�
 
 ## 前提・問題意識
 
-SocialDogの投稿パフォーマンス機能開発において、大量のデータを効率的に処理する必要性から、BigQueryの採用を検討しました。その過程で、既存のバッチ処理やAPIで使用しているGolangとBigQueryを連携させる環境の構築に取り組むことになりました。
+SocialDogの投稿パフォーマンス機能開発において、大量のデータを効率的に処理する必要性から、BigQueryの採用を検討しました。その過程で、既存のバッチ処理やAPIで使用しているGo言語とBigQueryを連携させる環境の構築に取り組むことになりました。
 
-しかし、GolangでBigQueryを扱う環境の構築に関する情報が非常に限られていたため、多くの課題に直面しました。この記事では、私たちが経験した問題と、その解決策を共有します。
+しかし、Go言語でBigQueryを扱う環境の構築に関する情報が非常に限られていたため、多くの課題に直面しました。この記事では、私たちが経験した問題と、その解決策を共有します。
 
-## GolangとBigQueryを統合したい
+## Go言語とBigQueryを統合したい
 
-SocialDogのバックエンドの新機能開発では、Golangを主に使用しています。投稿パフォーマンス機能のAPI、バッチ機能開発でもGolangを利用するため、どのようにBigQueryと統合するかが問題になりました。当初は、ローカル開発環境をbigquery-emulator（後述）のみで完結させることを目指していましたが、現在は一部開発用のBigQueryを使用して実装を進める形に落ち着いています。
+SocialDogのバックエンドの新機能開発では、Go言語を主に使用しています。投稿パフォーマンス機能のAPI、バッチ機能開発でもGo言語を利用するため、どのようにBigQueryと統合するかが問題になりました。当初は、ローカル開発環境をbigquery-emulator（後述）のみで完結させることを目指していましたが、現在は一部開発用のBigQueryを使用して実装を進める形に落ち着いています。
 
 - **本番環境**: BigQueryを使用
 - **開発環境**: bigquery-emulatorの使用、開発用に割り当てたBigQueryを一部テストで使用
 
-## Golangで利用できるパッケージについて
+## Go言語で利用できるパッケージについて
 
-また、BigQueryを取り扱うためのGolangのパッケージとして、下記を採用しています。
+また、BigQueryを取り扱うためのGo言語のパッケージとして、下記を採用しています。
 
 - BigQuery REST APIを取り扱う
   - [bigquery package - cloud.google.com/go/bigquery - Go Packages](https://pkg.go.dev/cloud.google.com/go/bigquery)
@@ -49,7 +49,7 @@ goccyさんという方が開発されています。
 
 1. Docker環境の準備
 2. bigquery-emulatorのコンテナ設定
-3. Golang環境とのインテグレーション
+3. Go言語環境とのインテグレーション
 
 SocialDogの開発ではDocker Composeを採用しており、比較的簡単にコンテナを作成することができました。
 
@@ -70,7 +70,7 @@ imageは下記から選択することができます。
 
 ## 開発中のトラブルと解決策のtips
 
-BigQueryとGolangをベースにした開発環境との統合に関する情報が少なく、開発環境構築には苦慮しました。今も課題はありますが、開発中に直面した課題とチームで採用した解決策について紹介したいと思います。
+BigQueryとGo言語をベースにした開発環境との統合に関する情報が少なく、開発環境構築には苦慮しました。今も課題はありますが、開発中に直面した課題とチームで採用した解決策について紹介したいと思います。
 
 ### 1. bigquery-emulatorで関数が動作しない問題
 
@@ -152,7 +152,7 @@ bigquery-emulator:
 
 > Storage Write API は、古い insertAll ストリーミング API よりも大幅に低コストです。さらに、1 か月あたり最大 2 TiB を無料で取り込むことができます。- BigQuery Storage Write API の概要  |  Google Cloud
 
-問題は、BigQuery Storage Write APIをGolangに組み込むための情報が不足していたことです。　体系的に解説する記事が当時は存在しなかったため、ここら辺を参考に実装を進めました。
+問題は、BigQuery Storage Write APIをGo言語に組み込むための情報が不足していたことです。　体系的に解説する記事が当時は存在しなかったため、ここら辺を参考に実装を進めました。
 
 - https://github.com/bucketeer-io/bucketeer/blob/19548c4f783869040b51fb0eddde5d9b25adcdab/pkg/storage/v2/bigquery/writer/client.go
 - https://github.com/luci/luci-go/blob/3f7339cdf0b0747619d469d92b84725a9006e050/resultdb/bqutil/storagewrite.go
@@ -422,9 +422,9 @@ func (wc *WriteClient) WriteBatch(ctx context.Context, schema bigquery.Schema, t
 
 ## まとめ
 
-BigQueryとGolangを用いた開発環境の統合は、数多くの課題に直面しました。Analyticsチームで環境を構築し始めた当時、ベストプラクティス的な情報が少なく、暫定的な解決策を見つけるのに試行錯誤した記憶があります。
+BigQueryとGo言語を用いた開発環境の統合は、数多くの課題に直面しました。Analyticsチームで環境を構築し始めた当時、ベストプラクティス的な情報が少なく、暫定的な解決策を見つけるのに試行錯誤した記憶があります。
 
-この記事がGolangでBigQueryを導入しようとしている皆さんの参考になれば幸いです。
+この記事がGo言語でBigQueryを導入しようとしている皆さんの参考になれば幸いです。
 
 ## SocialDogについて
 
