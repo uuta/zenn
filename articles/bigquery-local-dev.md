@@ -26,14 +26,12 @@ SocialDogのバックエンドの新機能開発では、Golangを主に使用�
 
 また、BigQueryを取り扱うためのGolangのパッケージとして、下記を採用しています。
 
-- 本番環境
-  - BigQuery REST APIを取り扱う
-    - [bigquery package - cloud.google.com/go/bigquery - Go Packages](https://pkg.go.dev/cloud.google.com/go/bigquery)
-  - BigQuery Storage Write APIを取り扱う
-    - [managedwriter package - cloud.google.com/go/bigquery/storage/managedwriter - Go Packages](https://pkg.go.dev/cloud.google.com/go/bigquery/storage/managedwriter)
-- 開発環境
-  - BigQueryサーバーをローカル環境でエミュレートする
-    - https://github.com/goccy/bigquery-emulator
+- BigQuery REST APIを取り扱う
+  - [bigquery package - cloud.google.com/go/bigquery - Go Packages](https://pkg.go.dev/cloud.google.com/go/bigquery)
+- BigQuery Storage Write APIを取り扱う
+  - [managedwriter package - cloud.google.com/go/bigquery/storage/managedwriter - Go Packages](https://pkg.go.dev/cloud.google.com/go/bigquery/storage/managedwriter)
+- BigQueryサーバーをローカル環境でエミュレートする
+  - https://github.com/goccy/bigquery-emulator
 
 ## ローカル環境の構築
 
@@ -76,7 +74,7 @@ BigQueryとGolangをベースにした開発環境との統合に関する情報
 
 ### 1. bigquery-emulatorで関数が動作しない問題
 
-bigquery-emulatorを使用する中で、いくつかの関数が動作しないという問題に直面しました。具体的には、ANY_VALUE、DATETIME_BUCKET、MAX_BY、MIN_BYなどの関数が使用できませんでした。
+bigquery-emulatorを使用する中で、いくつかの関数が動作しないという問題に直面しました。具体的にはDATETIME_BUCKET、MAX_BY、MIN_BYなどの関数が使用できませんでした。
 
 理由は、bigquery-emulatorが依存しているhttps://github.com/goccy/go-zetasqliteで、上記の関数が現状サポートされていなかったためです。MAX_BYやMIN_BYなどの関数は、BigQueryが提供する比較的新しいクエリであり、サポート外の関数が出るのは避けられない印象です。
 
@@ -85,16 +83,11 @@ bigquery-emulatorを使用する中で、いくつかの関数が動作しない
 1. CREATE FUNCTIONを使用して、必要な関数を擬似的に作成
 2. BigQuery本体でクエリを実行し、結果を確認する方法を併用
 
-まず、1に関して、`udfs`というstring型のスライスの中にCREATE FUNCTIONを入れ、擬似的にTIMESTAMP_BUCKET、DATETIME_BUCKETが利用できる形にしました。以下はCREATE FUNCTIONをGoで実装する例です。
+まず、1に関して、`udfs`というstring型のスライスの中にCREATE FUNCTIONを入れ、擬似的にTIMESTAMP_BUCKETが利用できる形にしました。以下はCREATE FUNCTIONをGoで実装する例です。
 
 ```go
-func InitEmulator(f NewClientFunc) error {
-	ctx := context.Background()
-	c, err := f(ctx)
-	if err != nil {
-		return fmt.Errorf("failed init emulator: %w", err)
-	}
-	defer c.Close()
+func CreateFunction(ctx context.Context, c *bigquery.Client) error {
+	// 追加したいユーザー関数を定義
 	udfs := []string{
 		`
 			CREATE FUNCTION TIMESTAMP_BUCKET(datetime TIMESTAMP, int INTERVAL) AS (
@@ -108,38 +101,21 @@ func InitEmulator(f NewClientFunc) error {
 				END
 			)
 		`,
-		`
-			CREATE FUNCTION DATETIME_BUCKET(datetime DATETIME, int INTERVAL) AS (
-				CASE int
-					WHEN INTERVAL 1 HOUR
-						THEN datetime
-					WHEN INTERVAL 1 DAY
-						THEN EXTRACT(DATE FROM datetime)
-					WHEN INTERVAL 7 DAY
-						THEN DATETIME_SUB(EXTRACT(DATE FROM datetime), INTERVAL EXTRACT(DAYOFWEEK FROM datetime) - 1 DAY)
-				END
-			)
-		`,
 	}
 	for _, udf := range udfs {
-		q := c.c.Query(udf)
+		q := c.Query(udf)
 		j, err := q.Run(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to create udf: %w", err)
 		}
 
-		status, err := j.Wait(ctx)
+		_, err = j.Wait(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to create udf: %w", err)
-		}
-
-		if err := status.Err(); err != nil {
 			return fmt.Errorf("failed to create udf: %w", err)
 		}
 	}
 	return nil
 }
-
 ```
 
 また、2に関して、BigQueryに用意した開発用のデータを用いて直接クエリを叩いて結果を確認しながら開発を進める方法を部分的に採用しています。
