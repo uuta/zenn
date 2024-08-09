@@ -108,8 +108,7 @@ bigquery-emulatorを使用する中で、いくつかの関数が動作しない
 ```go
 func CreateFunction(ctx context.Context, c *bigquery.Client) error {
     // 追加したいユーザー関数を定義
-    udfs := []string{
-        `
+    udf := `
             CREATE FUNCTION TIMESTAMP_BUCKET(datetime TIMESTAMP, int INTERVAL) AS (
                 CASE int
                     WHEN INTERVAL 1 HOUR
@@ -120,20 +119,10 @@ func CreateFunction(ctx context.Context, c *bigquery.Client) error {
                         THEN TIMESTAMP_SUB(TIMESTAMP(EXTRACT(DATE FROM datetime)), INTERVAL EXTRACT(DAYOFWEEK FROM datetime) - 1 DAY)
                 END
             )
-        `,
-    }
-    for _, udf := range udfs {
-        q := c.Query(udf)
-        j, err := q.Run(ctx)
-        if err != nil {
-            return fmt.Errorf("failed to create udf: %w", err)
-        }
-
-        _, err = j.Wait(ctx)
-        if err != nil {
-            return fmt.Errorf("failed to create udf: %w", err)
-        }
-    }
+    `
+    q := c.Query(udf)
+    j, _ := q.Run(ctx)
+    j.Wait(ctx)
     return nil
 }
 ```
@@ -241,7 +230,7 @@ option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials(
 
 - 参考: [BigQuery Storage Write API の概要  |  Google Cloud](https://cloud.google.com/bigquery/docs/write-api?hl=ja)
 
-当初はデフォルトストリームを用いて書き込みを行うつもりでした。しかし、bigquery-emulatorで対応しておらず、保留タイプを使用して書き込みを行う形に変更しました。
+業務上は、上記のフローチャートから**保留タイプ**が最適だと判断し、保留タイプのストリームを作成して書き込みを行いました。
 
 ```go
 pendingStream, err := wc.c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRequest{
@@ -252,7 +241,7 @@ pendingStream, err := wc.c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRe
 
 :::message
 
-試してはいないですが、下記のPRでデフォルトストリームに対応したようです🎉
+実装当時、bigquery-emulatorがデフォルトストリームに未対応でしたが、下記のPRで使用可能になったようです🎉
 
 - https://github.com/goccy/bigquery-emulator/pull/226
   :::
@@ -262,39 +251,43 @@ pendingStream, err := wc.c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRe
 開発環境でbigquery-emulatorに、本番環境でBigQueryに接続するため、**main.go内で環境変数により接続先を変える**実装にしています。下記は開発環境かどうかでbigquery-emulatorに接続するかどうかを判定していますが、特定の場合に開発用のBigQueryに接続できるように条件を追加しても良いかもしれません。
 
 ```go
-var bqNewClientFunc bq.NewClientFunc
-var bqNewWriteClientFunc bq.NewWriteClientFunc
+var bqNewClientFunc NewClientFunc
+var bqNewWriteClientFunc NewWriteClientFunc
 // 接続先をbigquery-emulatorに
-if cfg.IsDevelopment() {
+if IsDevelopment() {
     // BigQuery REST APIクライアントの初期化
-    bqNewClientFunc = bq.NewEmulatorClient(
-        cfg.BqProjectID,
-        cfg.BqDatasetID,
+    bqNewClientFunc = NewEmulatorClient(
+        "projectID",
+        "datasetID",
         "http://bigquery-emulator:9050",
     )
     // BigQuery Storage Write APIクライアントの初期化
     bqNewWriteClientFunc = bq.NewEmulatorWriter(
-        cfg.BqProjectID,
-        cfg.BqDatasetID,
+        "projectID",
+        "datasetID",
         "bigquery-emulator:9060",
     )
-    if err := bq.InitEmulator(bqNewClientFunc); err != nil {
-        return fmt.Errorf("failed to initializing bigquery-emulator: %w", err)
-    }
+    bqClient := bqNewClientFunc(context.Background())
+    // bigquery-emulatorで対応していない関数をudfとして定義する。
+    CreateFunction(bqNewClientFunc)
 // 接続先をBigQueryに
 } else {
     // BigQuery REST APIクライアントの初期化
-    bqNewClientFunc = bq.NewClient(cfg.BqProjectID, cfg.BqDatasetID)
+    bqNewClientFunc = NewClient("projectID", "datasetID")
     // BigQuery Storage Write APIクライアントの初期化
-    bqNewWriteClientFunc = bq.NewWriter(cfg.BqProjectID, cfg.BqDatasetID)
+    bqNewWriteClientFunc = NewWriter("projectID", "datasetID")
 }
-
 ```
 
 また、開発向けに作成した`NewEmulatorClient`、`NewEmulatorWriter` の3つ目の引数でserverURLを指定しているのですが、これらはそれぞれ下記のように設定する必要がありました。
 
 - http://bigquery-emulator:9050
 - bigquery-emulator:9060
+
+BigQuery REST APIとBigQuery Storage Write APIは、それぞれ使用しているプロトコルが異なるため、bigquery-emulatorではURLを変更する必要がありました。
+
+- **BigQuery REST API**: RESTful HTTP
+- **BigQuery Storage Write API**: gRPC
 
 ### 5. レコードの読み込み
 
@@ -436,16 +429,24 @@ func (wc *WriteClient) WriteBatch(ctx context.Context, schema bigquery.Schema, t
 }
 ```
 
-上記のコードでは保留タイプの書き込みを利用して結果をコミットしていますが、デフォルトタイプではもう少し簡略化できるかもしれません。BigQuery Storage Write APIの書き込みは自前で実装する必要が多々ありました。GitHub上で`managedwriter`、`protobuf/proto`等で検索し、公開されているコードを参考に実装してみると良いと思います。
+上記のコードでは保留タイプの書き込みを利用して結果をコミットしていますが、デフォルトタイプではもう少し簡略化できるかもしれません。
+
+BigQuery Storage Write APIの書き込みは自前で実装する必要があり、主に下記のドキュメントを参考に実装を進めました。
+
+- [Storage Write API を使用したデータ読み込みのバッチ処理  |  BigQuery  |  Google Cloud](https://cloud.google.com/bigquery/docs/write-api-batch?hl=ja#go)
+
+また、自前で実装される際は、GitHub上で`managedwriter`、`protobuf/proto`等で検索し、公開されているコードを参考に実装してみても良いと思います。
 
 - https://github.com/search?q=managedwriter&type=code
 - https://github.com/search?q=protobuf%2Fproto&type=code
 
 ## まとめ
 
-BigQueryとGo言語を用いた開発環境の統合は、数多くの課題に直面しました。Analyticsチームで環境を構築し始めた当時、ベストプラクティス的な情報が少なく、暫定的な解決策を見つけるのに試行錯誤した記憶があります。
+BigQueryとGo言語を用いた開発環境の統合は、数多くの課題に直面しました。Analyticsチームで環境を構築し始めた当時、ベストプラクティス的な情報が少なく、暫定的な解決策を見つけるのに試行錯誤した記憶があります。Go言語でBigQueryを導入しようとしている皆さんの参考になれば幸いです。
 
-この記事がGo言語でBigQueryを導入しようとしている皆さんの参考になれば幸いです。
+また、この記事は、同じチームでBigQueryの設計・実装を担当した中村さんにも監修していただいています。BigQuery採用の経緯は下記の記事にも記載されていますので、あわせてご覧ください。
+
+- [月間7,000万行のデータ分析を支えるバックエンド](https://zenn.dev/socialdog/articles/bfcbd1f5c48f5a)
 
 ## SocialDogについて
 
